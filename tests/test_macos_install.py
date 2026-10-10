@@ -58,7 +58,7 @@ class InstallerTests(unittest.TestCase):
         self.root.mkdir(parents=True)
         self.plist = self.directory / "Launch Daemons" / "lanmonitor.plist"
         self.plist.parent.mkdir()
-        self.user = SimpleNamespace(pw_name="fixture-user", pw_uid=501, pw_gid=os.getgid())
+        self.user = SimpleNamespace(pw_name="fixture-user", pw_uid=os.getuid() or 501, pw_gid=os.getgid())
         self.python = self.directory / "Python 安装" / "bin" / "python3"
         self.launchd = FakeLaunchd()
         self.installer = install.Installer(self.source, self.root, self.plist, self.python,
@@ -179,7 +179,8 @@ class InstallerTests(unittest.TestCase):
         self.launchd.events.clear()
         self.chown.reset_mock()
         self.fchown.reset_mock()
-        self.installer.user = SimpleNamespace(pw_name="another-fixture-user", pw_uid=502, pw_gid=os.getgid())
+        self.installer.user = SimpleNamespace(pw_name="another-fixture-user", pw_uid=self.user.pw_uid + 1,
+                                             pw_gid=os.getgid())
         with self.assertRaisesRegex(RuntimeError, "原服务用户"):
             self.installer.install()
         self.chown.assert_not_called()
@@ -267,6 +268,77 @@ class InstallerTests(unittest.TestCase):
         self.assertTrue(lock.exists())
         self.fchown.assert_not_called()
 
+    def test_wait_stopped_repairs_root_owned_sqlite_files_under_database_lock(self):
+        self.installer.data.mkdir()
+        lock = self.installer.data / "lanmonitor.sqlite3.lock"
+        lock.touch()
+        lock_inode = lock.stat().st_ino
+        files = {}
+        for suffix in ("", "-wal", "-shm"):
+            path = self.installer.data / ("lanmonitor.sqlite3" + suffix)
+            path.write_bytes(b"preserved database bytes")
+            path.chmod(0o644)
+            files[path.stat().st_ino] = path
+        original_fstat = install.os.fstat
+        owners = {}
+        modes = {}
+
+        def root_owned_stat(fd):
+            result = original_fstat(fd)
+            if result.st_ino in files:
+                fields = list(result)
+                fields[4] = 0  # Simulate root ownership without changing real owners.
+                return os.stat_result(fields)
+            return result
+
+        def change_owner(fd, uid, gid):
+            path = files.get(original_fstat(fd).st_ino)
+            if path is not None:
+                with self.assertRaisesRegex(RuntimeError, "文件正在使用"):
+                    with install.file_lock(lock):
+                        self.fail("SQLite ownership changed without the database lock")
+                owners[path.name] = (uid, gid)
+
+        def change_mode(fd, mode):
+            path = files.get(original_fstat(fd).st_ino)
+            if path is not None:
+                modes[path.name] = mode
+
+        self.fchown.side_effect = change_owner
+        with mock.patch.object(install.os, "fstat", side_effect=root_owned_stat), \
+                mock.patch.object(install.os, "fchmod", side_effect=change_mode):
+            self.installer.wait_stopped()
+        self.assertEqual(owners, {path.name: (self.user.pw_uid, self.user.pw_gid)
+                                  for path in files.values()})
+        self.assertEqual(modes, {path.name: 0o600 for path in files.values()})
+        self.assertEqual(lock.stat().st_ino, lock_inode)
+        for inode, path in files.items():
+            self.assertEqual(path.stat().st_ino, inode)
+            self.assertEqual(path.read_bytes(), b"preserved database bytes")
+
+    def test_wait_stopped_refuses_sqlite_files_owned_by_another_user(self):
+        self.installer.data.mkdir()
+        database = self.installer.data / "lanmonitor.sqlite3"
+        database.write_bytes(b"another user's database")
+        inode = database.stat().st_ino
+        original_fstat = install.os.fstat
+        changed_inodes = []
+
+        def foreign_owned_stat(fd):
+            result = original_fstat(fd)
+            if result.st_ino == inode:
+                fields = list(result)
+                fields[4] = self.user.pw_uid + 1000
+                return os.stat_result(fields)
+            return result
+
+        self.fchown.side_effect = lambda fd, _uid, _gid: changed_inodes.append(original_fstat(fd).st_ino)
+        with mock.patch.object(install.os, "fstat", side_effect=foreign_owned_stat):
+            with self.assertRaises(PermissionError):
+                self.installer.wait_stopped()
+        self.assertNotIn(inode, changed_inodes)
+        self.assertEqual(database.read_bytes(), b"another user's database")
+
     def migration_source(self):
         source = self.directory / "旧 data 空格"
         source.mkdir()
@@ -322,6 +394,46 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(marker.read_bytes(), b"existing settings")
         self.assertEqual(self.launchd.events, [])
         self.preflight.assert_not_called()
+
+    def test_wal_import_publishes_only_service_owned_files_before_first_open(self):
+        source = self.migration_source()
+        (source / "settings.json").write_bytes(b'{"arp_enabled": true}')
+        (source / "server.json").write_bytes(b'{"host": "127.0.0.1", "port": 25400}')
+        self.installer.data.mkdir()
+        original_replace = install.os.replace
+        publications = []
+
+        def inspect_publish(staged, destination):
+            if Path(destination) == self.installer.data:
+                # Opening the destination first may let SQLite clean up WAL/SHM
+                # and hide root-owned sidecars left by a privileged installer.
+                files = list(Path(staged).iterdir())
+                self.assertEqual({path.name for path in files},
+                                 {"lanmonitor.sqlite3", "settings.json", "server.json"})
+                for path in files:
+                    self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+                    self.chown.assert_any_call(path, self.user.pw_uid, self.user.pw_gid)
+                publications.append(Path(destination))
+            return original_replace(staged, destination)
+
+        database = source / "lanmonitor.sqlite3"
+        with closing(sqlite3.connect(str(database))) as source_db:
+            source_db.execute("PRAGMA journal_mode=WAL")
+            source_db.execute("PRAGMA wal_autocheckpoint=0")
+            source_db.execute("INSERT INTO fixture_notes VALUES (?)", ("pending WAL note",))
+            source_db.commit()
+            self.assertGreater(Path(str(database) + "-wal").stat().st_size, 0)
+            with mock.patch.object(install.os, "replace", side_effect=inspect_publish):
+                self.installer.import_data(source)
+        self.assertEqual(publications, [self.installer.data])
+        with closing(sqlite3.connect(str(self.installer.data / "lanmonitor.sqlite3"))) as target_db:
+            self.assertEqual(target_db.execute("PRAGMA journal_mode").fetchone(), ("delete",))
+            self.assertEqual(target_db.execute("SELECT note FROM fixture_notes").fetchall(),
+                             [("pending WAL note",)])
+            self.assertEqual(target_db.execute("PRAGMA journal_mode=WAL").fetchone(), ("wal",))
+            target_db.execute("INSERT INTO fixture_notes VALUES (?)", ("service write",))
+            target_db.commit()
+            self.assertEqual(target_db.execute("SELECT count(*) FROM fixture_notes").fetchone(), (2,))
 
     def test_import_publish_failure_leaves_empty_destination_and_can_retry(self):
         source = self.migration_source()

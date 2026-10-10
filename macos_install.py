@@ -287,11 +287,32 @@ class Installer:
             try:
                 with file_lock(self.data / "lanmonitor.sqlite3.lock") as stream:
                     os.fchown(stream.fileno(), self.user.pw_uid, self.user.pw_gid)
+                    self.database_permissions()
                     return
             except RuntimeError:
                 if time.monotonic() >= deadline:
                     raise RuntimeError("旧服务仍在关闭，安装中止；未切换程序") from None
                 time.sleep(0.1)
+
+    def database_permissions(self):
+        """Called only while holding the stopped database's ownership lock.
+
+        Earlier imports could retain root-created WAL/SHM files. Repair those
+        metadata in place so an upgrade can recover without dropping journals
+        or replacing any database/lock inode.
+        """
+        for suffix in ("", "-wal", "-shm"):
+            path = self.data / ("lanmonitor.sqlite3" + suffix)
+            try:
+                fd = os.open(path, os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK)
+            except FileNotFoundError:
+                continue
+            with os.fdopen(fd, "r+b") as stream:
+                info = os.fstat(stream.fileno())
+                if not stat.S_ISREG(info.st_mode) or info.st_uid not in (0, self.user.pw_uid):
+                    raise PermissionError("数据库文件归属不符合预期：" + str(path))
+                os.fchown(stream.fileno(), self.user.pw_uid, self.user.pw_gid)
+                os.fchmod(stream.fileno(), 0o600)
 
     def import_data(self, source):
         if any(self.data.iterdir()):
@@ -323,9 +344,22 @@ class Installer:
                         if time.monotonic() > deadline:
                             raise RuntimeError("数据库导入超时")
                     source_db.backup(target_db, pages=256, progress=progress)
+                    # A backup inherits the source's WAL mode. Switch the
+                    # private copy to DELETE before publishing it, so root's
+                    # WAL/SHM files cannot enter the service user's data dir.
+                    if target_db.execute("PRAGMA journal_mode=DELETE").fetchone()[0] != "delete":
+                        raise RuntimeError("无法完成数据库日志合并")
                     target_db.set_progress_handler(lambda: int(time.monotonic() > deadline), 1000)
                     if target_db.execute("PRAGMA quick_check").fetchone()[0] != "ok":
                         raise ValueError("导入数据库损坏")
+            # Both private SQLite connections are now closed in DELETE mode.
+            # Some SQLite builds retain the now-unused SHM file after changing
+            # modes. Only discard sidecars here, never from the live data path.
+            leftover_wal = staged_data / "lanmonitor.sqlite3-wal"
+            if leftover_wal.exists() and leftover_wal.stat().st_size:
+                raise RuntimeError("导入数据库仍有未合并的 WAL")
+            leftover_wal.unlink(missing_ok=True)
+            (staged_data / "lanmonitor.sqlite3-shm").unlink(missing_ok=True)
             for name in ("settings.json", "server.json"):
                 path = source / name
                 if path.exists():
