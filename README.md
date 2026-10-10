@@ -2,7 +2,7 @@
 
 无第三方运行依赖的内网监测器，支持 Python 3.9+、macOS / Linux。固定监测 `192.168.100.0/24`；页面展示完整 256 格，`.0` 和 `.255` 不参与采集和管理。
 
-## 运行
+## 源码运行
 
 ```sh
 python3 app.py                       # http://127.0.0.1:25400
@@ -14,7 +14,36 @@ python3 manage.py stop
 
 内网访问可执行 `python3 manage.py restart --host 192.168.100.254`。监听地址及端口保存后沿用，可用 `--port` 调整。服务没有登录认证，能访问服务的设备也能管理记录。
 
-直接运行支持 `--no-scan` 暂停采集、`--database 路径` 和 `--settings 路径`。Linux 采集需要 `iproute2` 和 `iputils-ping`。`Ctrl-C` 或 `SIGTERM` 会正常关闭服务。后台日志按 5 MiB 轮转，保留 3 份归档；不配置开机启动。
+直接运行支持 `--no-scan` 暂停采集、`--database 路径` 和 `--settings 路径`。Linux 采集需要 `iproute2` 和 `iputils-ping`。`Ctrl-C` 或 `SIGTERM` 会正常关闭服务。后台日志按 5 MiB 轮转，保留 3 份归档。`manage.py` 仅管理源码目录的服务。
+
+## macOS 安装
+
+使用长期保留的 Python 3.9+，在源码目录执行：
+
+```sh
+./macos_install.zsh --user "$(id -un)" --python "$(command -v python3)" --dry-run
+sudo ./macos_install.zsh --user "$(id -un)" --python "$(command -v python3)"
+```
+
+安装为系统 LaunchDaemon，开机即运行，无需登录；程序使用指定普通用户身份。首次默认访问 `http://127.0.0.1:25400`，内网访问可加 `--host 192.168.100.254`，端口可加 `--port`。服务没有登录认证，请按实际访问范围选择监听地址。
+
+程序安装到 `/Library/Application Support/LanMonitor`，`current` 指向当前版本，数据独立保存在 `data/`，日志为 `data/server.log`，按 5 MiB 轮转并保留 3 份归档。更新源码后再次运行安装命令即可升级，沿用数据与监听配置。
+
+首次从源码服务迁移数据，先停止源服务，再导入：
+
+```sh
+python3 manage.py stop
+sudo ./macos_install.zsh --user "$(id -un)" --python "$(command -v python3)" \
+  --import-data "$PWD/data" --host 192.168.100.254
+```
+
+安装服务由 `launchctl` 管理；重启时依次停止、加载：
+
+```sh
+sudo launchctl print system/io.github.zhao-zirui.lanmonitor
+sudo launchctl bootout system/io.github.zhao-zirui.lanmonitor
+sudo launchctl bootstrap system /Library/LaunchDaemons/io.github.zhao-zirui.lanmonitor.plist
+```
 
 ## 使用与数据
 

@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-SOURCES = ["app.py", "config.py", "constants.py", "store.py", "scanner.py", "http_api.py", "manage.py", "check.py"]
+SOURCES = ["app.py", "config.py", "constants.py", "store.py", "scanner.py", "http_api.py", "manage.py", "macos_install.py", "check.py"]
 
 
 def main():
@@ -32,6 +32,8 @@ def main():
         [node, "--check", "static/app.js"],
         [node, "--test", "tests/frontend.test.js"],
     ]
+    if sys.platform == "darwin":
+        commands.append(["/bin/zsh", "-n", "macos_install.zsh"])
     for command in commands:
         print("\n运行：" + " ".join(command), flush=True)
         # fixed checks; NODE is an explicit local executable override.
