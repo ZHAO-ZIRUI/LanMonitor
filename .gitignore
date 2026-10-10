@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+data/*
+!data/.gitkeep
+.DS_Store
+.venv/
+.ruff_cache/
+.coverage

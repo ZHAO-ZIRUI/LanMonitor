@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#000000">
+  <title>LAN MONITOR · 192.168.100.0/24</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <div class="workspace">
+    <header class="header">
+      <div class="brand">
+        <span class="brand-icon" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+        <div class="brand-title">LAN MONITOR</div>
+      </div>
+      <div class="network-heading"><span class="network-prefix">192.168.100<span class="network-mask">.0 / 24</span></span></div>
+      <div class="header-actions">
+        <span id="connection" class="connection"><i></i><span>连接中</span></span>
+        <button id="fullscreen" class="icon-button" aria-label="进入全屏" title="进入全屏">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 3H3v5M16 3h5v5M3 16v5h5M21 16v5h-5"/></svg>
+        </button>
+        <button id="settings-open" class="settings-button" aria-label="打开 Settings" aria-haspopup="dialog" title="Settings">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m9.5 3-.6 2.4-2 .9L4.7 6 3 9l1.8 1.7v2.6L3 15l1.7 3 2.2-.3 2 .9.6 2.4h5l.6-2.4 2-.9 2.2.3 1.7-3-1.8-1.7v-2.6L21 9l-1.7-3-2.2.3-2-.9L14.5 3Z"/><circle cx="12" cy="12" r="3"/></svg><span>Settings</span>
+        </button>
+      </div>
+    </header>
+
+    <section class="toolbar" aria-label="网络状态">
+      <div class="statistics">
+        <span class="stat"><i class="status-dot green"></i><strong id="count-online">—</strong><span>在线</span></span>
+        <span class="stat"><i class="status-dot yellow"></i><strong id="count-seen">—</strong><span>出现过</span></span>
+        <span class="stat"><i class="status-dot magenta"></i><strong id="count-infra">—</strong><span>基础设施</span></span>
+        <span class="stat"><i class="reserved-sample"></i><strong id="count-reserved">—</strong><span>预留</span></span>
+      </div>
+      <div class="toolbar-right">
+        <span class="dhcp-key special-key"><i></i>网络 / 广播</span>
+        <span class="dhcp-key"><i></i>DHCP 地址池</span>
+      </div>
+    </section>
+
+    <main id="grid" class="ip-grid" aria-label="192.168.100.0/24 全部地址"></main>
+
+  </div>
+
+  <dialog id="settings-modal" class="settings-modal" aria-labelledby="settings-title">
+    <div class="settings-heading"><h1 id="settings-title">Settings</h1><button id="settings-close" class="icon-button" type="button" aria-label="关闭设置"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>
+    <form id="settings-form">
+      <div class="settings-body">
+        <section class="settings-section">
+          <h2>监测</h2>
+          <div class="settings-menu">
+            <label class="settings-row"><span class="settings-copy"><span>启用监测</span><small>持续更新设备状态和历史记录</small></span><span class="settings-toggle"><input type="checkbox" name="scan_enabled"><span class="settings-toggle-track" aria-hidden="true"></span></span></label>
+            <label class="settings-row"><span class="settings-copy"><span>探测频率</span><small>全网共用，最多 4 次/秒</small></span><select name="probe_rate" aria-label="探测频率"><option value="1">1 次/秒</option><option value="2">2 次/秒</option><option value="3">3 次/秒</option><option value="4">4 次/秒</option></select></label>
+            <label class="settings-row"><span class="settings-copy"><span>在线判定时间</span><small>收到响应或新流量后保留在线状态</small></span><span class="settings-number"><input type="number" name="online_window" min="30" max="600" required aria-label="在线判定秒数"><span>秒</span></span></label>
+          </div>
+        </section>
+        <section class="settings-section">
+          <h2>采集来源</h2>
+          <div class="settings-menu">
+            <label class="settings-row"><span class="settings-copy"><span>ICMP 探测</span><small>通过 Ping 确认设备响应</small></span><span class="settings-toggle"><input type="checkbox" name="ping_enabled"><span class="settings-toggle-track" aria-hidden="true"></span></span></label>
+            <label class="settings-row"><span class="settings-copy"><span>ARP 记录</span><small>读取本机邻居缓存中的 IP 和 MAC</small></span><span class="settings-toggle"><input type="checkbox" name="arp_enabled"><span class="settings-toggle-track" aria-hidden="true"></span></span></label>
+            <label class="settings-row"><span class="settings-copy"><span>记录读取间隔</span><small>本机接口和 ARP 的更新间隔</small></span><span class="settings-number"><input type="number" name="passive_interval" min="10" max="120" required aria-label="记录读取间隔秒数"><span>秒</span></span></label>
+            <label class="settings-row"><span class="settings-copy"><span>查询主机名</span><small>使用内网 mDNS 与主路由名称查询</small></span><span class="settings-toggle"><input type="checkbox" name="name_lookup"><span class="settings-toggle-track" aria-hidden="true"></span></span></label>
+            <label class="settings-row"><span class="settings-copy"><span>名称查询间隔</span><small>按批次查询已发现的设备</small></span><span class="settings-number"><input type="number" name="name_interval" min="12" max="120" required aria-label="名称查询间隔秒数"><span>秒</span></span></label>
+          </div>
+        </section>
+        <section class="settings-section">
+          <h2>网络</h2>
+          <div class="settings-menu">
+            <div class="settings-row"><span class="settings-copy"><span>监测网段</span></span><span id="settings-subnet" class="settings-readonly">192.168.100.0/24</span></div>
+            <div class="settings-row"><span class="settings-copy"><span>DHCP 地址池</span><small>设置本程序中的地址分类</small></span><span class="settings-range"><span>.</span><input type="number" name="dhcp_start" min="1" max="254" required aria-label="DHCP 起始地址末段"><span>–</span><span>.</span><input type="number" name="dhcp_end" min="1" max="254" required aria-label="DHCP 结束地址末段"></span></div>
+          </div>
+          <p class="settings-hint">地址池范围用于界面标记；路由器的 DHCP 设置由路由器管理。</p>
+        </section>
+        <section class="settings-section">
+          <h2>显示</h2>
+          <div class="settings-menu">
+            <label class="settings-row"><span class="settings-copy"><span>显示主机名</span><small>在矩阵中显示已解析的设备名称</small></span><span class="settings-toggle"><input type="checkbox" name="show_hostnames"><span class="settings-toggle-track" aria-hidden="true"></span></span></label>
+            <label class="settings-row"><span class="settings-copy"><span>页面刷新间隔</span><small>取得最新设备状态的间隔</small></span><span class="settings-number"><input type="number" name="refresh_interval" min="1" max="30" required aria-label="页面刷新间隔秒数"><span>秒</span></span></label>
+          </div>
+        </section>
+        <section class="settings-section">
+          <h2>数据管理</h2>
+          <div class="settings-menu">
+            <label class="settings-row"><span class="settings-copy"><span>自动清理旧地址</span><small>删除同一 MAC 的离线旧地址，保留设备备注</small></span><span class="settings-toggle"><input type="checkbox" name="auto_cleanup_old_addresses"><span class="settings-toggle-track" aria-hidden="true"></span></span></label>
+            <button id="history-clear-dhcp" class="settings-row settings-history-action" type="button"><span class="settings-copy"><span>清空 DHCP 历史</span><small id="history-dhcp-range">DHCP 地址池内的设备记录与标记</small></span><span class="settings-chevron" aria-hidden="true">›</span></button>
+            <button id="history-clear-all" class="settings-row settings-history-action" type="button"><span class="settings-copy"><span>清空全部历史记录</span><small>重置全部设备记录、地址标记与备注</small></span><span class="settings-chevron" aria-hidden="true">›</span></button>
+          </div>
+          <p class="settings-hint">清空 DHCP 历史会保留设备备注，重置全部记录会一并清除备注。程序设置保留。</p>
+        </section>
+        <section class="settings-section">
+          <h2>服务信息</h2>
+          <div class="settings-menu">
+            <div class="settings-row"><span class="settings-copy"><span>监听地址</span></span><span id="settings-service-host" class="settings-readonly">—</span></div>
+            <div class="settings-row"><span class="settings-copy"><span>Web 端口</span></span><span id="settings-service-port" class="settings-readonly">—</span></div>
+          </div>
+        </section>
+        <p id="settings-message" class="settings-message" role="status" aria-live="polite"></p>
+      </div>
+      <div class="settings-actions"><button id="settings-cancel" type="button">取消</button><button id="settings-save" type="submit">保存设置</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="history-confirm" class="history-confirm" aria-labelledby="history-confirm-title" aria-describedby="history-confirm-description">
+    <h2 id="history-confirm-title"></h2>
+    <p id="history-confirm-description"></p>
+    <p id="history-confirm-message" class="settings-message" role="status" aria-live="polite"></p>
+    <div class="history-confirm-actions"><button id="history-confirm-cancel" type="button">取消</button><button id="history-confirm-clear" type="button">确认清空</button></div>
+  </dialog>
+
+  <div id="drawer-backdrop" class="drawer-backdrop" hidden></div>
+  <aside id="drawer" class="drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-ip" hidden>
+    <div class="drawer-top"><span class="eyebrow">ADDRESS DETAILS</span><button id="drawer-close" class="icon-button" aria-label="关闭详情"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>
+    <div class="drawer-heading"><h1 id="drawer-ip"></h1><span id="drawer-status" class="status-badge"></span></div>
+    <p id="drawer-hostname" class="drawer-hostname"></p>
+    <div id="drawer-tags" class="drawer-tags"></div>
+    <section id="device-note-section" class="details-section">
+      <h2 id="device-note-title">设备备注</h2>
+      <form id="device-note-form">
+        <textarea id="device-note-input" maxlength="200" rows="3" placeholder="例如：客厅电视、工作电脑" aria-labelledby="device-note-title" aria-describedby="device-note-hint"></textarea>
+        <p id="device-note-hint" class="note-hint"></p>
+        <div class="note-actions"><button id="device-note-clear" type="button">清除备注</button><button id="device-note-cancel" type="button">取消修改</button><button id="device-note-save" type="submit">保存</button></div>
+        <p id="device-note-message" class="note-message" role="status" aria-live="polite"></p>
+      </form>
+    </section>
+    <div class="details-section"><h2>设备信息</h2><dl id="device-details" class="detail-list"></dl></div>
+    <div class="details-section"><h2>观测记录</h2><dl id="observation-details" class="detail-list"></dl></div>
+    <div id="drawer-operations" class="operations">
+      <h2>地址管理</h2>
+      <button id="infra-action" class="action-card"><span class="action-icon infra-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="4" y="4" width="16" height="6" rx="1.5"/><rect x="4" y="14" width="16" height="6" rx="1.5"/><path d="M7 7h1M7 17h1M11 7h6M11 17h6"/></svg></span><span class="action-copy"><strong id="infra-label">标记为基础设施</strong><small>用洋红色识别路由器、服务器等设备</small></span><span id="infra-switch" class="switch" aria-hidden="true"><i></i></span></button>
+      <button id="reserve-action" class="action-card"><span class="action-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="m4 12 8-8M4 19 15 4M10 20 10-10M17 20l3-3"/></svg></span><span class="action-copy"><strong id="reserve-label">预留此地址</strong><small>以斜线纹标记，方便规划地址</small></span><span id="reserve-switch" class="switch" aria-hidden="true"><i></i></span></button>
+      <p class="operation-note">预留和基础设施标记保存在本程序中。预留不会修改路由器的 DHCP 分配。</p>
+      <button id="delete-action" class="delete-button"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M3 5h14M8 2h4l1 3M5 5l1 12h8l1-12M8 8v6M12 8v6"/></svg>删除记录</button>
+      <p class="delete-note">清除该地址的历史和标记，保留设备备注；设备再次被检测到会重新记录。</p>
+    </div>
+    <p id="special-note" class="operation-note" hidden>这是子网的特殊地址，不参与主机探测。</p>
+  </aside>
+  <div id="toast" class="toast" role="status" hidden></div>
+</body>
+</html>
